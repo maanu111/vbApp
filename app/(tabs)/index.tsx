@@ -35,7 +35,6 @@ interface Product {
   id: string;
   product_name: string;
   price: number;
-  gst: number;
   image_url: string | null;
   created_at: string;
   updated_at: string;
@@ -56,13 +55,15 @@ export default function HomeScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [productName, setProductName] = useState("");
   const [price, setPrice] = useState("");
-  const [gst, setGst] = useState("");
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [quantities, setQuantities] = useState<{ [key: string]: number }>({});
   const [showBillButton, setShowBillButton] = useState(false);
   const [imageUri, setImageUri] = useState<string | null>(null);
-
+  const [showBillSummary, setShowBillSummary] = useState(false);
+  const [showBillModal, setShowBillModal] = useState(false);
+  const [gstPercentage, setGstPercentage] = useState(0);
+  const [paymentMode, setPaymentMode] = useState<"cash" | "upi">("cash");
   // Animation values
   const buttonScale = useSharedValue(1);
   const modalScale = useSharedValue(0);
@@ -76,11 +77,32 @@ export default function HomeScreen() {
     opacity: interpolate(modalScale.value, [0, 1], [0, 1]),
   }));
 
-  // Fetch products on component mount
   useEffect(() => {
     fetchProducts();
   }, []);
+  useEffect(() => {
+    fetchGstPercentage();
+  }, []);
 
+  const fetchGstPercentage = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("gst")
+        .select("percentage")
+        .eq("id", 1)
+        .single();
+
+      if (error && error.code !== "PGRST116") {
+        throw error;
+      }
+
+      if (data) {
+        setGstPercentage(data.percentage || 0);
+      }
+    } catch (error) {
+      console.error("Error fetching GST:", error);
+    }
+  };
   const fetchProducts = async () => {
     try {
       const { data, error } = await supabase
@@ -127,7 +149,6 @@ export default function HomeScreen() {
       setModalVisible(false);
       setProductName("");
       setPrice("");
-      setGst("");
       setImageUri(null);
     }, 200);
   };
@@ -159,7 +180,7 @@ export default function HomeScreen() {
   // Single unified create product function
   const handleCreateProduct = async () => {
     // Validation
-    if (!productName || !price || !gst) {
+    if (!productName || !price) {
       Alert.alert("Error", "Please fill all fields");
       return;
     }
@@ -214,7 +235,6 @@ export default function HomeScreen() {
         {
           product_name: productName,
           price: parseFloat(price),
-          gst: parseFloat(gst),
           image_url: imageUrl,
         },
       ]);
@@ -239,7 +259,9 @@ export default function HomeScreen() {
         ...prev,
         [productId]: (prev[productId] || 0) + 1,
       };
-      setShowBillButton(Object.values(newQuantities).some((qty) => qty > 0));
+      const hasItems = Object.values(newQuantities).some((qty) => qty > 0);
+      setShowBillButton(hasItems);
+      setShowBillSummary(hasItems);
       return newQuantities;
     });
   };
@@ -251,7 +273,9 @@ export default function HomeScreen() {
         ...prev,
         [productId]: Math.max(0, (prev[productId] || 0) - 1),
       };
-      setShowBillButton(Object.values(newQuantities).some((qty) => qty > 0));
+      const hasItems = Object.values(newQuantities).some((qty) => qty > 0);
+      setShowBillButton(hasItems);
+      setShowBillSummary(hasItems);
       return newQuantities;
     });
   };
@@ -263,7 +287,9 @@ export default function HomeScreen() {
         ...prev,
         [productId]: currentQty > 0 ? 0 : 1,
       };
-      setShowBillButton(Object.values(newQuantities).some((qty) => qty > 0));
+      const hasItems = Object.values(newQuantities).some((qty) => qty > 0);
+      setShowBillButton(hasItems);
+      setShowBillSummary(hasItems);
       return newQuantities;
     });
   };
@@ -276,7 +302,6 @@ export default function HomeScreen() {
         product_name: product.product_name,
         quantity: quantities[product.id],
         price: product.price,
-        gst: product.gst,
       }));
 
     if (selectedItems.length === 0) {
@@ -287,11 +312,52 @@ export default function HomeScreen() {
     const billNumber = Math.floor(Math.random() * 1000) + 1;
 
     try {
-      await printDirectToThermal(selectedItems, billNumber);
+      // Updated function call with paymentMode and gstPercentage
+      await printDirectToThermal(
+        selectedItems,
+        billNumber,
+        paymentMode,
+        gstPercentage
+      );
       Alert.alert("Success", "Printing...");
+
+      // Reset quantities after successful printing
+      const resetQuantities: { [key: string]: number } = {};
+      products.forEach((product) => {
+        resetQuantities[product.id] = 0;
+      });
+      setQuantities(resetQuantities);
+      setShowBillModal(false);
+      setShowBillSummary(false);
+      setShowBillButton(false);
     } catch (error) {
       Alert.alert("Error", "Failed to print");
     }
+  };
+
+  const calculateTotalAmount = () => {
+    return products.reduce((total, product) => {
+      const quantity = quantities[product.id] || 0;
+      return total + product.price * quantity;
+    }, 0);
+  };
+  const calculateGstAmount = () => {
+    const subtotal = calculateTotalAmount();
+    return (subtotal * gstPercentage) / 100;
+  };
+
+  const calculateGrandTotal = () => {
+    const subtotal = calculateTotalAmount();
+    const gstAmount = calculateGstAmount();
+    return subtotal + gstAmount;
+  };
+  const getSelectedItemsCount = () => {
+    return Object.values(quantities).filter((qty) => qty > 0).length;
+  };
+
+  const handlePrintFromModal = () => {
+    setShowBillModal(false);
+    handleCreateBill();
   };
 
   return (
@@ -343,17 +409,18 @@ export default function HomeScreen() {
                     />
                   </View>
 
-                  {/* Product Info Row */}
-                  <View style={styles.productInfo}>
-                    <View style={styles.productDetails}>
-                      <Text style={styles.productName}>
+                  {/* Product Info with Quantity Controls Below */}
+                  {/* Product Info */}
+                  <View style={styles.productDetails}>
+                    {/* Product Name and Price in same line */}
+                    <View style={styles.productTitleRow}>
+                      <Text style={styles.productName} numberOfLines={1}>
                         {product.product_name}
                       </Text>
                       <Text style={styles.productPrice}>₹{product.price}</Text>
-                      <Text style={styles.productGst}>GST: {product.gst}%</Text>
                     </View>
 
-                    {/* Quantity Controls */}
+                    {/* Quantity Controls below */}
                     <View style={styles.quantityContainer}>
                       <TouchableOpacity
                         style={styles.quantityButton}
@@ -381,7 +448,7 @@ export default function HomeScreen() {
         )}
       </ScrollView>
 
-      {/* Modal */}
+      {/* Create Product Modal */}
       <Modal
         animationType="fade"
         transparent={true}
@@ -416,18 +483,6 @@ export default function HomeScreen() {
                   placeholder="Enter price"
                   value={price}
                   onChangeText={setPrice}
-                  keyboardType="decimal-pad"
-                  placeholderTextColor="#999"
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>GST (%)</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter GST percentage"
-                  value={gst}
-                  onChangeText={setGst}
                   keyboardType="decimal-pad"
                   placeholderTextColor="#999"
                 />
@@ -481,15 +536,148 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      {/* Floating Create Bill Button */}
+      {/* Bill Summary Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={showBillModal}
+        onRequestClose={() => setShowBillModal(false)}
+      >
+        <View style={styles.billModalOverlay}>
+          <View style={styles.billModalContent}>
+            {/* Modal Header */}
+            <View style={styles.billModalHeader}>
+              <Text style={styles.billModalTitle}>Bill Summary</Text>
+              <TouchableOpacity
+                onPress={() => setShowBillModal(false)}
+                style={styles.billCloseButton}
+              >
+                <Text style={styles.billCloseButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Bill Items List */}
+            <ScrollView style={styles.billItemsContainer}>
+              {products.filter((product) => quantities[product.id] > 0)
+                .length === 0 ? (
+                <Text style={styles.noItemsText}>No items selected</Text>
+              ) : (
+                products
+                  .filter((product) => quantities[product.id] > 0)
+                  .map((product) => (
+                    <View key={product.id} style={styles.billItem}>
+                      <View style={styles.billItemInfo}>
+                        <Text style={styles.billItemName}>
+                          {product.product_name}
+                        </Text>
+                        <Text style={styles.billItemPrice}>
+                          ₹{product.price} x {quantities[product.id]}
+                        </Text>
+                      </View>
+                      <Text style={styles.billItemTotal}>
+                        ₹{(product.price * quantities[product.id]).toFixed(2)}
+                      </Text>
+                    </View>
+                  ))
+              )}
+            </ScrollView>
+
+            {/* Total Amount with GST */}
+            <View style={styles.billTotalContainer}>
+              <View style={styles.billTotalRow}>
+                <Text style={styles.billTotalLabel}>Subtotal:</Text>
+                <Text style={styles.billTotalAmount}>
+                  ₹{calculateTotalAmount().toFixed(2)}
+                </Text>
+              </View>
+
+              {gstPercentage > 0 && (
+                <View style={styles.billTotalRow}>
+                  <Text style={styles.billTotalLabel}>
+                    GST ({gstPercentage}%):
+                  </Text>
+                  <Text style={styles.billTotalAmount}>
+                    ₹{calculateGstAmount().toFixed(2)}
+                  </Text>
+                </View>
+              )}
+
+              <View style={styles.billTotalRow}>
+                <Text style={styles.billGrandTotalLabel}>Grand Total:</Text>
+                <Text style={styles.billGrandTotalAmount}>
+                  ₹{calculateGrandTotal().toFixed(2)}
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      {/* Expandable Bill Summary Bar */}
+      {showBillSummary && (
+        <View style={styles.billSummaryBar}>
+          <View style={styles.billSummaryContent}>
+            {/* Empty space on left to push text to right */}
+            <View style={styles.emptySpace} />
+
+            {/* Plain "View Details" text on right side */}
+            <TouchableOpacity onPress={() => setShowBillModal(true)}>
+              <Text style={styles.viewDetailsText}>View Details</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Floating Create Bill Button with Payment Toggle */}
       {showBillButton && (
         <View style={styles.floatingButtonContainer}>
-          <TouchableOpacity
-            style={styles.createBillButton}
-            onPress={handleCreateBill}
-          >
-            <Text style={styles.createBillButtonText}>Create Bill</Text>
-          </TouchableOpacity>
+          <View style={styles.bottomSection}>
+            {/* Payment Mode Toggle */}
+            <View style={styles.paymentModeContainer}>
+              <Text style={styles.paymentModeLabel}>Payment:</Text>
+              <View style={styles.paymentToggle}>
+                <TouchableOpacity
+                  style={[
+                    styles.paymentOption,
+                    paymentMode === "cash" && styles.paymentOptionActive,
+                  ]}
+                  onPress={() => setPaymentMode("cash")}
+                >
+                  <Text
+                    style={[
+                      styles.paymentOptionText,
+                      paymentMode === "cash" && styles.paymentOptionTextActive,
+                    ]}
+                  >
+                    Cash
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.paymentOption,
+                    paymentMode === "upi" && styles.paymentOptionActive,
+                  ]}
+                  onPress={() => setPaymentMode("upi")}
+                >
+                  <Text
+                    style={[
+                      styles.paymentOptionText,
+                      paymentMode === "upi" && styles.paymentOptionTextActive,
+                    ]}
+                  >
+                    UPI
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Create Bill Button */}
+            <TouchableOpacity
+              style={styles.createBillButton}
+              onPress={handleCreateBill}
+            >
+              <Text style={styles.createBillButtonText}>Create Bill</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
     </View>
@@ -540,6 +728,12 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
+  productTitleRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
   contentContainer: {
     flexGrow: 1,
     padding: 10,
@@ -577,13 +771,8 @@ const styles = StyleSheet.create({
     borderColor: "#477998",
     backgroundColor: "#F0F7FA",
   },
-  productInfo: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
   productDetails: {
-    flex: 1,
+    width: "100%",
   },
   productImagePlaceholder: {
     width: "100%",
@@ -603,17 +792,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: "#333",
-    marginBottom: 4,
+    flex: 1,
+    marginRight: 8,
   },
   productPrice: {
     fontSize: 18,
     fontWeight: "bold",
     color: "#477998",
-    marginBottom: 2,
-  },
-  productGst: {
-    fontSize: 14,
-    color: "#666",
   },
   modalOverlay: {
     flex: 1,
@@ -637,7 +822,9 @@ const styles = StyleSheet.create({
   quantityContainer: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    justifyContent: "center",
+    gap: 10,
+    marginTop: 8,
   },
   quantityButton: {
     backgroundColor: "#477998",
@@ -773,9 +960,107 @@ const styles = StyleSheet.create({
     padding: 20,
     backgroundColor: "transparent",
   },
+  bottomSection: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+  },
+  paymentModeContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  paymentModeLabel: {
+    color: "#477998",
+    fontSize: 14,
+    fontWeight: "600",
+    marginRight: 8,
+  },
+  paymentToggle: {
+    flexDirection: "row",
+    backgroundColor: "#E5E5E5",
+    borderRadius: 8,
+    padding: 2,
+  },
+  paymentOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  paymentOptionActive: {
+    backgroundColor: "#477998",
+  },
+  paymentOptionText: {
+    color: "#666",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  paymentOptionTextActive: {
+    color: "#FFFFFF",
+  },
+  billSummaryBar: {
+    position: "absolute",
+    bottom: 65,
+    left: 0,
+    right: 0,
+    backgroundColor: "transparent", // No background color
+    marginHorizontal: 20,
+    padding: 16,
+    // Remove shadow and elevation since no background
+  },
+  billSummaryContent: {
+    flexDirection: "row",
+    justifyContent: "space-between", // This will push items to edges
+    alignItems: "center",
+  },
+  emptySpace: {
+    flex: 1, // This takes up all available space, pushing button to right
+  },
+  selectedItemsCount: {
+    flex: 1,
+  },
+  selectedItemsText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  billSummaryTotal: {
+    flex: 1,
+    alignItems: "center",
+  },
+  totalAmountText: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  billTotalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+
+  billGrandTotalLabel: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#333",
+  },
+  billGrandTotalAmount: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#477998",
+  },
+  viewDetailsText: {
+    color: "#477998", // Use your app's blue color
+    fontSize: 16,
+    fontWeight: "600",
+    textDecorationLine: "underline",
+  },
   createBillButton: {
     backgroundColor: "#477998",
     paddingVertical: 16,
+    paddingHorizontal: 24,
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
@@ -784,10 +1069,133 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
+    minWidth: 120,
   },
   createBillButtonText: {
     color: "#FFFFFF",
     fontSize: 18,
     fontWeight: "bold",
+  },
+  // Bill Modal Styles
+  billModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "flex-end",
+  },
+  billModalContent: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: "80%",
+  },
+  billModalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E5E5",
+  },
+  billModalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#477998",
+  },
+  billCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#F5F5F5",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  billCloseButtonText: {
+    fontSize: 18,
+    color: "#666",
+    fontWeight: "300",
+  },
+  billItemsContainer: {
+    maxHeight: 300,
+    paddingHorizontal: 20,
+  },
+  billItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
+  },
+  billItemInfo: {
+    flex: 1,
+  },
+  billItemName: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#333",
+    marginBottom: 4,
+  },
+  billItemPrice: {
+    fontSize: 14,
+    color: "#666",
+  },
+  billItemTotal: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#477998",
+  },
+  billTotalContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 2,
+    borderTopColor: "#E5E5E5",
+    backgroundColor: "#F9F9F9",
+  },
+  billTotalLabel: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#333",
+  },
+  billTotalAmount: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#477998",
+  },
+  billModalFooter: {
+    flexDirection: "row",
+    gap: 12,
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: "#E5E5E5",
+  },
+  billModalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cancelBillButton: {
+    backgroundColor: "#F5F5F5",
+  },
+  cancelBillButtonText: {
+    color: "#666",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  printBillButton: {
+    backgroundColor: "#477998",
+  },
+  printBillButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  noItemsText: {
+    textAlign: "center",
+    fontSize: 16,
+    color: "#999",
+    paddingVertical: 40,
   },
 });

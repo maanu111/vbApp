@@ -1,32 +1,61 @@
 import * as Print from "expo-print";
+import { supabase } from "@/lib/supabaseClient";
 
 interface BillItem {
   id: string;
   product_name: string;
   quantity: number;
   price: number;
-  gst: number;
+}
+
+interface BusinessSettings {
+  business_name: string;
+  address: string;
+  phone_number: string;
 }
 
 export const printDirectToThermal = async (
   items: BillItem[],
-  billNumber: number
+  billNumber: number,
+  paymentMode: "cash" | "upi",
+  gstPercentage: number
 ) => {
   const date = new Date();
   let subTotal = 0;
-  let totalGstAmount = 0;
   let totalQty = 0;
 
-  // Calculate subtotal and GST
+  // Calculate subtotal
   items.forEach((item) => {
     const itemTotal = item.price * item.quantity;
-    const gstAmount = (itemTotal * item.gst) / 100;
     subTotal += itemTotal;
-    totalGstAmount += gstAmount;
     totalQty += item.quantity;
   });
 
-  const grandTotal = subTotal + totalGstAmount;
+  // Calculate GST amount and grand total
+  const gstAmount = (subTotal * gstPercentage) / 100;
+  const grandTotal = subTotal + gstAmount;
+
+  // Fetch business settings from Supabase
+  let businessSettings: BusinessSettings = {
+    business_name: "Vajanbadhao",
+    address: "Shop No 12, RK Heights, MG Road, Pune, MAHARASHTRA",
+    phone_number: "9604132864",
+  };
+
+  try {
+    const { data, error } = await supabase
+      .from("business_settings")
+      .select("business_name, address, phone_number")
+      .eq("id", 1)
+      .single();
+
+    if (data && !error) {
+      businessSettings = data;
+    }
+  } catch (error) {
+    console.error("Error fetching business settings:", error);
+    // Use default values if fetch fails
+  }
 
   const html = `
     <html>
@@ -38,15 +67,17 @@ export const printDirectToThermal = async (
         table { width: 100%; border-collapse: collapse; margin: 10px 0; }
         td { padding: 2px 0; }
         .line { border-top: 1px dashed #000; margin: 5px 0; }
+        .total-row { margin: 3px 0; }
+        .right { text-align: right; }
       </style>
     </head>
     <body>
       <div class="center">
-        <div style="font-size: 8pt;">🍴 KITCHEN LOGO 🍴</div>
-        <div class="bold">Vajanbadhao</div>
-        <div style="font-size: 8pt;">Shop No 12, RK Heights, MG Road, Pune, MAHARASHTRA</div>
-        <div style="font-size: 8pt;">Consumer number:</div>
-        <div style="font-size: 8pt;">Phone: 9857387616</div>
+        <div class="bold">${businessSettings.business_name}</div>
+        <div style="font-size: 8pt;">${businessSettings.address}</div>
+        <div style="font-size: 8pt;">Phone: ${
+          businessSettings.phone_number
+        }</div>
       </div>
       
       <div class="line"></div>
@@ -60,7 +91,6 @@ export const printDirectToThermal = async (
     minute: "2-digit",
     hour12: true,
   })}</div>
-        <div>Bill To: Cash Sale</div>
       </div>
       
       <div class="line"></div>
@@ -75,22 +105,12 @@ export const printDirectToThermal = async (
         ${items
           .map((item) => {
             const itemTotal = item.price * item.quantity;
-            const gstAmount = (itemTotal * item.gst) / 100;
-            const totalWithGst = itemTotal + gstAmount;
             return `
             <tr>
               <td>${item.product_name}</td>
               <td align="center">${item.quantity}</td>
               <td align="right">${item.price}</td>
               <td align="right">${itemTotal.toFixed(2)}</td>
-            </tr>
-            <tr>
-              <td colspan="3" style="padding-left: 10px; font-size: 8pt;">GST ${
-                item.gst
-              }%</td>
-              <td align="right" style="font-size: 8pt;">+${gstAmount.toFixed(
-                2
-              )}</td>
             </tr>
           `;
           })
@@ -102,17 +122,21 @@ export const printDirectToThermal = async (
       <div>
         <div>Total Items: ${items.length}</div>
         <div>Total Quantity: ${totalQty}</div>
-        <div style="text-align: right;">Sub Total: ₹${subTotal.toFixed(2)}</div>
-        <div style="text-align: right;">Total GST: ₹${totalGstAmount.toFixed(
+        <div class="total-row">Subtotal: ₹${subTotal.toFixed(2)}</div>
+      ${
+        gstAmount > 0
+          ? `<div class="total-row">GST (${gstPercentage}%): ₹${gstAmount.toFixed(
+              2
+            )}</div>`
+          : ""
+      }
+        <div class="center bold" style="font-size: 16pt; margin: 8px 0;">Grand Total: ₹${grandTotal.toFixed(
           2
         )}</div>
-        <div class="center bold" style="font-size: 16pt;">Total ₹${grandTotal.toFixed(
+        <div class="total-row" style="text-align: right;">Received: ₹${grandTotal.toFixed(
           2
         )}</div>
-        <div style="text-align: right;">Received: ₹${grandTotal.toFixed(
-          2
-        )}</div>
-        <div style="text-align: right;">Mode of Payment: cash</div>
+        <div class="total-row" style="text-align: right;">Mode of Payment: ${paymentMode.toUpperCase()}</div>
       </div>
       
       <div class="center" style="margin-top: 10px;">
