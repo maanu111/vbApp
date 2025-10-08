@@ -4,48 +4,54 @@
     "slug": "vajanbadhao",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/splash-icon.jpg",
     "scheme": "vajanbadhao",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+
     "splash": {
-      "image": "./assets/images/splash-icon.png",
+      "image": "./assets/images/splash-icon.jpg",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
+
     "ios": {
       "supportsTablet": true,
       "splash": {
-        "image": "./assets/images/splash-icon.png",
+        "image": "./assets/images/splash-icon.jpg",
         "resizeMode": "contain",
         "backgroundColor": "#ffffff"
       }
     },
+
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/images/splash-icon.jpg",
+        "backgroundImage": "./assets/images/splash-icon.jpg",
+        "monochromeImage": "./assets/images/splash-icon.jpg"
       },
       "splash": {
-        "image": "./assets/images/splash-icon.png",
+        "image": "./assets/images/splash-icon.jpg",
         "resizeMode": "contain",
         "backgroundColor": "#ffffff",
-        "mdpi": "./assets/images/splash-icon.png",
-        "hdpi": "./assets/images/splash-icon.png",
-        "xhdpi": "./assets/images/splash-icon.png",
-        "xxhdpi": "./assets/images/splash-icon.png",
-        "xxxhdpi": "./assets/images/splash-icon.png"
+        "mdpi": "./assets/images/splash-icon.jpg",
+        "hdpi": "./assets/images/splash-icon.jpg",
+        "xhdpi": "./assets/images/splash-icon.jpg",
+        "xxhdpi": "./assets/images/splash-icon.jpg",
+        "xxxhdpi": "./assets/images/splash-icon.jpg"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
+
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/splash-icon.jpg"
     },
+
     "plugins": ["expo-router", "expo-font"],
+
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
