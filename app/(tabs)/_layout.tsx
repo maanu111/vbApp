@@ -52,7 +52,7 @@ export default function TabLayout() {
         tabBarButton: HapticTab,
 
         tabBarLabelStyle: {
-          fontSize: 14,
+          fontSize: 12,
           fontWeight: "600",
           marginBottom: 4,
         },
@@ -60,8 +60,8 @@ export default function TabLayout() {
           paddingVertical: 2,
         },
         tabBarStyle: {
-          height: 60,
-          paddingBottom: 6,
+          height: 80,
+          paddingBottom: 20,
         },
       }}
     >
