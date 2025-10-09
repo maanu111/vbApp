@@ -1112,6 +1112,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: "80%",
+    marginBottom: 20,
   },
   billModalHeader: {
     flexDirection: "row",
